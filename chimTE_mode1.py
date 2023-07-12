@@ -128,9 +128,9 @@ def remove():
         for file in glob.glob(str(aln_dir) + '/' + str(pattern)):
             os.remove(file)
 
-out_dir = create_dir(str(mydir+'/projects/'+str(args.project)))
-tmp = create_dir(str(mydir+'/projects/'+str(args.project)+'/tmp'))
-index = create_dir(str(mydir+'/projects/'+str(args.project)+'/index'))
+out_dir = create_dir(str(args.project))
+tmp = create_dir(str(args.project)+'/tmp')
+index = create_dir(str(args.project)+'/index')
 
 with open(str(tmp + '/gtf_file.gtf'), 'w', encoding='utf-8') as f:
     for line in (args.gene):
