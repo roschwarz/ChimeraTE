@@ -15,7 +15,17 @@ from io import StringIO
 import pybedtools
 import contextlib
 from termcolor import colored
-import sys
+#import time
+
+import argparse
+import subprocess
+import datetime
+import glob, os
+import pandas as pd
+import re
+import csv
+from io import StringIO
+
 
 print(colored("   ________    _                         ","white")+ colored(' ____________', 'red', attrs=['bold']))
 print(colored("  / ____/ /_  (_)___ ___  ___  _________","white")+ colored(' /_  __/ ____/', 'red', attrs=['bold']))
@@ -120,6 +130,7 @@ def remove():
 
 out_dir = create_dir(str(mydir+'/projects/'+str(args.project)))
 tmp = create_dir(str(mydir+'/projects/'+str(args.project)+'/tmp'))
+index = create_dir(str(mydir+'/projects/'+str(args.project)+'/index'))
 
 with open(str(tmp + '/gtf_file.gtf'), 'w', encoding='utf-8') as f:
     for line in (args.gene):
@@ -127,18 +138,70 @@ with open(str(tmp + '/gtf_file.gtf'), 'w', encoding='utf-8') as f:
             f.write(line)
 f.close()
 
+
+
 ## Create STAR index and bed files
-import mode1_prep_data
-from mode1_alignment import alignment_func
-from mode1_te_initiated import te_init
-from mode1_te_initiated import init_chimeras
-from mode1_te_initiated import multicore_process_init
-from mode1_te_terminated import te_term
-from mode1_te_terminated import multicore_process_term
-from mode1_te_exonized import te_exon_embedded
-from mode1_te_exonized import prep_overlapped
-from mode1_te_exonized import prep_intronic
-from mode1_te_exonized import multicore_process_exon
+##################################
+
+
+if not os.path.exists(f'{index}/SAindex'):
+
+    clock = time()
+    print(str(clock) + '\t' + "Splitting genes and exons positions")
+    complete_gene = pd.read_csv(str(tmp + '/gtf_file.gtf'), header=None, sep="\t", usecols=[0,1,2,3,4,5,6,7,8],names=['scaf', 'source', 'feature', 'start', 'end', 'dot', 'strand', 'dot2', 'ID'])
+    complete_gene['ID'] = complete_gene['ID'].str.replace("gene-", '')
+
+    #Gene region - GTF to BED
+    complete_gene = pd.read_csv(str(tmp + '/gtf_file.gtf'), header=None, sep="\t", usecols=[0,2,3,4,5,6,7,8],names=['scaf', 'source', 'feature', 'start', 'end', 'dot', 'strand', 'dot2', 'ID'])
+    complete_gene['ID'] = complete_gene['ID'].str.split(';').str[0]
+    complete_gene['ID'] = complete_gene['ID'].str.replace("\"", '')
+    complete_gene['ID'] = complete_gene['ID'].str.replace("gene_id ", '')
+    complete_gene['ID'] = complete_gene['ID'].str.replace("ID=", '')
+    gene = complete_gene[complete_gene["feature"] == "gene"]
+    gene[['scaf', 'start', 'end', 'ID', 'dot', 'strand']].to_csv(str(tmp + '/gene_coord.bed'), sep='\t', encoding='utf-8', header=None,index=False)
+
+    #Exon region - GTF to BED
+    complete_gene = pd.read_csv(str(tmp + '/gtf_file.gtf'), header=None, sep="\t", usecols=[0,2,3,4,5,6,7,8],names=['scaf', 'source', 'feature', 'start', 'end', 'dot', 'strand', 'dot2', 'ID'])
+    complete_gene['ID'] = complete_gene['ID'].str.split(';').str[0]
+    complete_gene['ID'] = complete_gene['ID'].str.replace("\"", '')
+    complete_gene['ID'] = complete_gene['ID'].str.replace("gene_id ", '')
+    complete_gene['ID'] = complete_gene['ID'].str.replace("ID=", '')
+
+    exon = complete_gene[complete_gene["feature"] == "exon"].drop_duplicates()
+    exon['ID'] = exon['ID'].str.replace('.*?gene=', '').str.replace(';product=.*', '')
+    exon[['scaf', 'start', 'end', 'ID', 'dot', 'strand']].to_csv(str(tmp + '/exon_file.bed'), sep='\t', encoding='utf-8', header=None,index=False)
+
+    #TE insertions - GTF to BED
+    complete_te = pd.read_csv(args.te, header=None, sep="\t", usecols=[0,2,3,4,5,6,7,8],names=['scaf', 'source', 'feature', 'start', 'end', 'dot', 'strand', 'dot2', 'ID'])
+    complete_te[['scaf', 'start', 'end', 'ID', 'dot2', 'strand']].to_csv(str(tmp + '/TE_file.bed'), sep='\t', encoding='utf-8', header=None,index=False)
+
+    print(colored("Done!", "green", attrs=['bold']))
+
+    #Creating STAR db
+    clock = time()
+    print(str(clock) + '\t' + "Creating STAR index with " + str(out_genome))
+    subprocess.call(['STAR', '--runThreadN', str(args.threads), '--runMode', str("genomeGenerate"), "--genomeDir", str(out_dir + '/index'), \
+    "--genomeFastaFiles", str(args.genome), "--sjdbGTFfile", str(tmp + '/gtf_file.gtf'), "--sjdbOverhang", str(99)], stdout=subprocess.DEVNULL)
+
+    print(colored("Done!", "green", attrs=['bold']))
+
+
+else:
+    print('Index already exists')
+
+#####################################
+
+#import scripts.mode1_prep_data
+from scripts.mode1_alignment import alignment_func
+from scripts.mode1_te_initiated import te_init
+from scripts.mode1_te_initiated import init_chimeras
+from scripts.mode1_te_initiated import multicore_process_init
+from scripts.mode1_te_terminated import te_term
+from scripts.mode1_te_terminated import multicore_process_term
+from scripts.mode1_te_exonized import te_exon_embedded
+from scripts.mode1_te_exonized import prep_overlapped
+from scripts.mode1_te_exonized import prep_intronic
+from scripts.mode1_te_exonized import multicore_process_exon
 
 for index, row in input.iterrows():
     mate1 = row['mate1']
@@ -147,9 +210,12 @@ for index, row in input.iterrows():
     out_group = create_dir(str(out_dir + '/' + group))
     global aln_dir
     aln_dir = create_dir(str(out_dir + '/' + group + '/alignment'))
-
     ###Perform STAR alignment and identify chimeric reads
-    alignment_func(out_dir,group,aln_dir,mate1,mate2)
+    if not os.path.exists(f"{aln_dir}/accepted_hits.bam"):
+        print(f"Run the alignment for {group}")
+        alignment_func(out_dir,group,aln_dir,mate1,mate2)
+    else:
+        print('Alignments are already available')
 
     ###Search for TE-initiated transcripts
     te_init(aln_dir, group, out_group)
@@ -178,7 +244,7 @@ for index, row in input.iterrows():
     remove()
 
 #Checking for replicability of chimeric transcripts in RNA-seq samples
-import mode1_replicability
+import scripts.mode1_replicability
 
 
 
